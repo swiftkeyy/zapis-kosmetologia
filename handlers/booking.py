@@ -233,7 +233,7 @@ async def booking_choose_service(
         reply_markup=get_slots_kb(slots),
     )
     await callback.answer()
-
+    
 
 @router.callback_query(SlotCb.filter())
 async def booking_choose_slot(
