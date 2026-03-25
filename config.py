@@ -18,10 +18,9 @@ class Config:
 
     SUBSCRIBE_CHANNEL_ID: int = 0
     SUBSCRIBE_CHANNEL_LINK: str = ""
-
     SCHEDULE_CHANNEL_ID: int = 0
 
-    # обратная совместимость со старым кодом
+    # совместимость со старым кодом
     CHANNEL_ID: int = 0
     CHANNEL_LINK: str = ""
 
@@ -53,17 +52,13 @@ def load_config() -> Config:
 
     admin_ids, first_admin_id = _parse_admin_ids()
 
-    # новые переменные
     subscribe_channel_id = os.getenv("SUBSCRIBE_CHANNEL_ID", "").strip()
     subscribe_channel_link = os.getenv("SUBSCRIBE_CHANNEL_LINK", "").strip()
     schedule_channel_id = os.getenv("SCHEDULE_CHANNEL_ID", "").strip()
 
-    # старые переменные
     channel_id = os.getenv("CHANNEL_ID", "").strip()
     channel_link = os.getenv("CHANNEL_LINK", "").strip()
 
-    # совместимость:
-    # если новых нет, берём старые
     final_subscribe_channel_id = subscribe_channel_id or channel_id
     final_subscribe_channel_link = subscribe_channel_link or channel_link
     final_schedule_channel_id = schedule_channel_id or channel_id
@@ -79,15 +74,11 @@ def load_config() -> Config:
         BOT_TOKEN=bot_token,
         ADMIN_IDS=admin_ids,
         ADMIN_ID=first_admin_id,
-
         SUBSCRIBE_CHANNEL_ID=int(final_subscribe_channel_id),
         SUBSCRIBE_CHANNEL_LINK=final_subscribe_channel_link,
         SCHEDULE_CHANNEL_ID=int(final_schedule_channel_id),
-
-        # для старого кода
         CHANNEL_ID=int(final_subscribe_channel_id),
         CHANNEL_LINK=final_subscribe_channel_link,
-
         DATABASE_PATH=os.getenv("DATABASE_PATH", "bot.db"),
-        TIMEZONE=os.getenv("TIMEZONE", "Europe/Moscow"),
+        TIMEZONE=os.getenv("TIMEZONE", "Europe/Samara"),
     )
