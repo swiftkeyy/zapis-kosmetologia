@@ -386,16 +386,16 @@ async def booking_confirm(
     await state.clear()
 
     if appointment:
-        # Уведомление владельцу бота
+        # Уведомление администраторам
         for admin_id in config.ADMIN_IDS:
-    try:
-        await bot.send_message(
-            admin_id,
-            format_admin_appointment_notification(appointment),
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
+            try:
+                await bot.send_message(
+                    admin_id,
+                    format_admin_appointment_notification(appointment),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
 
         # Уведомление в канал с расписанием
         try:
@@ -454,14 +454,14 @@ async def cancel_my_booking(
     await db.update_appointment_reminder_job(appointment["id"], None)
 
     for admin_id in config.ADMIN_IDS:
-    try:
-        await bot.send_message(
-            admin_id,
-            "❌ <b>Клиент отменил запись</b>\n\n" + format_appointment_html(appointment),
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
+        try:
+            await bot.send_message(
+                admin_id,
+                "❌ <b>Клиент отменил запись</b>\n\n" + format_appointment_html(appointment),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
     try:
         await bot.send_message(
