@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -41,18 +42,19 @@ class Database:
         db_path = Path(self.path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def _connect(self) -> aiosqlite.Connection:
-        db = await aiosqlite.connect(self.path)
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA foreign_keys = ON;")
-        await db.execute("PRAGMA journal_mode = WAL;")
-        await db.execute("PRAGMA synchronous = NORMAL;")
-        await db.execute("PRAGMA busy_timeout = 5000;")
-        return db
+    @asynccontextmanager
+    async def _connect(self):
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            await db.execute("PRAGMA foreign_keys = ON;")
+            await db.execute("PRAGMA journal_mode = WAL;")
+            await db.execute("PRAGMA synchronous = NORMAL;")
+            await db.execute("PRAGMA busy_timeout = 5000;")
+            yield db
 
     async def init(self) -> None:
         self._ensure_db_directory()
-        async with await self._connect() as db:
+        async with self._connect() as db:
 
             await db.execute(
                 """
@@ -161,19 +163,19 @@ class Database:
         await self.backfill_clients()
 
     async def _fetchall(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-        async with await self._connect() as db:
+        async with self._connect() as db:
             cursor = await db.execute(query, params)
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
     async def _fetchone(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-        async with await self._connect() as db:
+        async with self._connect() as db:
             cursor = await db.execute(query, params)
             row = await cursor.fetchone()
             return dict(row) if row else None
 
     async def _execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
-        async with await self._connect() as db:
+        async with self._connect() as db:
             cursor = await db.execute(query, params)
             await db.commit()
             return cursor.lastrowid
@@ -183,7 +185,7 @@ class Database:
         if exists:
             return
 
-        async with await self._connect() as db:
+        async with self._connect() as db:
             for service in DEFAULT_SERVICES:
                 await db.execute(
                     """
@@ -200,7 +202,7 @@ class Database:
             await db.commit()
 
     async def seed_text_settings(self) -> None:
-        async with await self._connect() as db:
+        async with self._connect() as db:
             for key, value in DEFAULT_TEXT_SETTINGS.items():
                 await db.execute(
                     """
@@ -224,7 +226,7 @@ class Database:
             GROUP BY a.user_id
             """
         )
-        async with await self._connect() as db:
+        async with self._connect() as db:
             for row in rows:
                 await db.execute(
                     """
@@ -241,7 +243,7 @@ class Database:
             await db.commit()
 
     async def upsert_client(self, user_id: int, username: str | None, full_name: str, phone: str) -> None:
-        async with await self._connect() as db:
+        async with self._connect() as db:
             await db.execute(
                 """
                 INSERT INTO clients(user_id, username, full_name, phone)
@@ -349,7 +351,7 @@ class Database:
         await self.set_service_active(service_id, False)
 
     async def add_work_day(self, day: str) -> None:
-        async with await self._connect() as db:
+        async with self._connect() as db:
             await db.execute(
                 """
                 INSERT INTO work_days(date, is_closed)
@@ -654,7 +656,7 @@ class Database:
     async def close_day_and_cancel_appointments(self, day: str) -> list[dict[str, Any]]:
         appointments = await self.get_appointments_by_date(day)
         await self.set_day_closed(day, True)
-        async with await self._connect() as db:
+        async with self._connect() as db:
             await db.execute(
                 """
                 UPDATE appointments
@@ -791,7 +793,7 @@ class Database:
 
         copied = 0
         skipped = 0
-        async with await self._connect() as db:
+        async with self._connect() as db:
             for slot in source_slots:
                 cursor = await db.execute(
                     """
