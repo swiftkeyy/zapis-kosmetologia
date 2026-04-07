@@ -27,20 +27,22 @@ async def send_or_edit(target: Message | CallbackQuery, text: str, reply_markup:
 
 
 @router.message(CommandStart())
-async def start_command(message: Message, config: Config, state: FSMContext) -> None:
+async def start_command(message: Message, config: Config, db: Database, state: FSMContext) -> None:
     await state.clear()
+    welcome_text = await db.get_setting("welcome_text", START_TEXT)
     await message.answer(
-        START_TEXT,
+        welcome_text,
         reply_markup=get_main_menu(is_admin=is_admin(message.from_user.id, config)),
     )
 
 
 @router.callback_query(MenuCb.filter(F.action == "main"))
-async def show_main_menu(callback: CallbackQuery, config: Config, state: FSMContext) -> None:
+async def show_main_menu(callback: CallbackQuery, config: Config, db: Database, state: FSMContext) -> None:
     await state.clear()
+    main_text = await db.get_setting("welcome_text", START_TEXT)
     await send_or_edit(
         callback,
-        text="🏠 <b>Главное меню</b>\n\nВыберите нужный раздел.",
+        text=main_text,
         reply_markup=get_main_menu(is_admin=is_admin(callback.from_user.id, config)),
     )
 

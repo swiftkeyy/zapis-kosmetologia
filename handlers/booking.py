@@ -81,6 +81,14 @@ async def start_booking(
 ) -> None:
     await state.clear()
 
+    if await db.is_client_blocked(callback.from_user.id):
+        await callback.message.edit_text(
+            "⛔ Вы не можете записаться через бота. Обратитесь к администратору.",
+            reply_markup=get_back_menu_kb(),
+        )
+        await callback.answer()
+        return
+
     active = await db.get_active_appointment_by_user(callback.from_user.id)
     if active:
         await callback.message.edit_text(
@@ -93,8 +101,9 @@ async def start_booking(
 
     subscribed = await is_subscribed(bot, config.SUBSCRIBE_CHANNEL_ID, callback.from_user.id)
     if not subscribed:
+        required_text = await db.get_setting("subscription_required_text", "Для записи необходимо подписаться на канал.")
         await callback.message.edit_text(
-            "Для записи необходимо подписаться на канал.",
+            required_text,
             reply_markup=get_subscription_kb(config.SUBSCRIBE_CHANNEL_LINK),
         )
         await callback.answer()
@@ -114,7 +123,8 @@ async def check_subscription_callback(
 ) -> None:
     subscribed = await is_subscribed(bot, config.SUBSCRIBE_CHANNEL_ID, callback.from_user.id)
     if not subscribed:
-        await callback.answer("Подписка пока не подтверждена.", show_alert=True)
+        failed_text = await db.get_setting("subscription_failed_text", "Подписка пока не подтверждена.")
+        await callback.answer(failed_text, show_alert=True)
         return
 
     active = await db.get_active_appointment_by_user(callback.from_user.id)

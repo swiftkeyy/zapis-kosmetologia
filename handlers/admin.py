@@ -15,6 +15,7 @@ from keyboards.callbacks import (
     AppointmentMoveSlotCb,
     ClientAdminCb,
     CalendarCb,
+    TextSettingCb,
     CategoryCb,
     MenuCb,
     ServiceAdminCb,
@@ -28,13 +29,16 @@ from keyboards.inline import (
     get_admin_category_kb,
     get_admin_client_card_kb,
     get_admin_clients_kb,
+    get_admin_date_ranges_kb,
     get_admin_menu_kb,
     get_admin_price_menu_kb,
     get_admin_service_card_kb,
     get_admin_services_delete_kb,
+    get_admin_stats_menu_kb,
     get_admin_services_manage_kb,
     get_admin_slots_delete_kb,
     get_admin_transfer_slots_kb,
+    get_admin_text_settings_kb,
     get_back_menu_kb,
 )
 from services.scheduler import ReminderScheduler
@@ -45,6 +49,8 @@ from utils.messages import (
     format_channel_cancellation_notification,
     format_channel_reschedule_notification,
     format_client_history_html,
+    format_stats_html,
+    TEXT_SETTING_TITLES,
 )
 
 
@@ -70,6 +76,28 @@ def get_schedule_channel_id(config: Config) -> int | None:
 def admin_enabled_dates(days: int = 90) -> set[date]:
     today = date.today()
     return {today + timedelta(days=offset) for offset in range(days + 1)}
+
+
+def parse_date_range_input(raw: str) -> tuple[str, str] | None:
+    separators = ["—", "-", ",", ";", "\n"]
+    cleaned = raw.strip()
+    # сначала пробуем взять первые две ISO-даты регуляркой без regex зависимостей
+    parts = [part for part in cleaned.replace("—", " ").replace(",", " ").replace(";", " ").split() if part]
+    iso_candidates: list[str] = []
+    for part in parts:
+        try:
+            date.fromisoformat(part)
+            iso_candidates.append(part)
+        except ValueError:
+            continue
+        if len(iso_candidates) == 2:
+            break
+    if len(iso_candidates) != 2:
+        return None
+    start_day, end_day = iso_candidates
+    if end_day < start_day:
+        start_day, end_day = end_day, start_day
+    return start_day, end_day
 
 
 async def open_admin_calendar(callback: CallbackQuery, scope: str, title: str) -> None:
@@ -1103,7 +1131,7 @@ async def admin_view_client(callback: CallbackQuery, callback_data: ClientAdminC
     history = await db.get_client_history(callback_data.user_id)
     await callback.message.edit_text(
         format_client_history_html(profile, history),
-        reply_markup=get_admin_client_card_kb(callback_data.user_id),
+        reply_markup=get_admin_client_card_kb(callback_data.user_id, bool(profile.get("is_blocked"))),
     )
     await callback.answer()
 
@@ -1238,3 +1266,201 @@ async def admin_copy_schedule_pick_target(
         reply_markup=get_admin_menu_kb(),
     )
     await callback.answer()
+
+
+@router.callback_query(AdminCb.filter(F.action == "statistics"))
+async def admin_statistics_menu(callback: CallbackQuery, config: Config) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📊 <b>Статистика</b>\n\nВыберите период:",
+        reply_markup=get_admin_stats_menu_kb(),
+    )
+    await callback.answer()
+
+
+async def _render_stats(callback: CallbackQuery, db: Database, title: str, start_day: str, end_day: str) -> None:
+    stats = await db.get_stats_between(start_day, end_day)
+    await callback.message.edit_text(
+        format_stats_html(title, start_day, end_day, stats),
+        reply_markup=get_admin_stats_menu_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(AdminCb.filter(F.action == "stats_today"))
+async def admin_stats_today(callback: CallbackQuery, config: Config, db: Database) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    today = date.today().isoformat()
+    await _render_stats(callback, db, "Статистика за сегодня", today, today)
+
+
+@router.callback_query(AdminCb.filter(F.action == "stats_week"))
+async def admin_stats_week(callback: CallbackQuery, config: Config, db: Database) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    today = date.today()
+    start_day = (today - timedelta(days=today.weekday())).isoformat()
+    end_day = (date.fromisoformat(start_day) + timedelta(days=6)).isoformat()
+    await _render_stats(callback, db, "Статистика за неделю", start_day, end_day)
+
+
+@router.callback_query(AdminCb.filter(F.action == "stats_month"))
+async def admin_stats_month(callback: CallbackQuery, config: Config, db: Database) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    today = date.today()
+    start_day = date(today.year, today.month, 1)
+    next_month = date(today.year + (today.month // 12), (today.month % 12) + 1, 1)
+    end_day = next_month - timedelta(days=1)
+    await _render_stats(callback, db, "Статистика за месяц", start_day.isoformat(), end_day.isoformat())
+
+
+@router.callback_query(AdminCb.filter(F.action == "blocked_clients"))
+async def admin_blocked_clients(callback: CallbackQuery, config: Config, db: Database) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    clients = await db.get_blocked_clients()
+    if not clients:
+        await callback.message.edit_text(
+            "⛔ <b>Стоп-лист</b>\n\nСейчас список пуст.",
+            reply_markup=get_admin_menu_kb(),
+        )
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        "⛔ <b>Стоп-лист</b>\n\nВыберите клиента:",
+        reply_markup=get_admin_clients_kb(clients),
+    )
+    await callback.answer()
+
+
+@router.callback_query(ClientAdminCb.filter(F.action == "toggle_block"))
+async def admin_toggle_client_block(callback: CallbackQuery, callback_data: ClientAdminCb, config: Config, db: Database) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    profile = await db.get_client_profile(callback_data.user_id)
+    if not profile:
+        await callback.answer("Клиент не найден.", show_alert=True)
+        return
+    new_status = not bool(profile.get("is_blocked"))
+    await db.set_client_blocked(callback_data.user_id, new_status)
+    updated_profile = await db.get_client_profile(callback_data.user_id)
+    history = await db.get_client_history(callback_data.user_id)
+    await callback.message.edit_text(
+        format_client_history_html(updated_profile, history),
+        reply_markup=get_admin_client_card_kb(callback_data.user_id, bool(updated_profile.get("is_blocked"))),
+    )
+    await callback.answer("Клиент обновлён")
+
+
+@router.callback_query(AdminCb.filter(F.action == "text_settings"))
+async def admin_text_settings_menu(callback: CallbackQuery, config: Config) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📝 <b>Настройки текстов</b>\n\nВыберите текст для редактирования:",
+        reply_markup=get_admin_text_settings_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(TextSettingCb.filter())
+async def admin_text_setting_pick(callback: CallbackQuery, callback_data: TextSettingCb, config: Config, db: Database, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    current_value = await db.get_setting(callback_data.key, "")
+    title = TEXT_SETTING_TITLES.get(callback_data.key, callback_data.key)
+    await state.set_state(AdminStates.edit_text_setting)
+    await state.update_data(text_setting_key=callback_data.key)
+    await callback.message.edit_text(
+        f"📝 <b>{title}</b>\n\nТекущее значение:\n\n{current_value}\n\n"
+        "Отправьте новый текст одним сообщением.",
+        reply_markup=get_back_menu_kb(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.edit_text_setting)
+async def admin_save_text_setting(message: Message, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    key = data.get("text_setting_key")
+    if not key:
+        await state.clear()
+        await message.answer("Не найден ключ настройки.", reply_markup=get_admin_menu_kb())
+        return
+    value = (message.text or "").strip()
+    if len(value) < 3:
+        await message.answer("Текст слишком короткий. Повторите ввод.")
+        return
+    await db.set_setting(key, value)
+    await state.clear()
+    await message.answer(
+        f"✅ Текст «{TEXT_SETTING_TITLES.get(key, key)}» обновлён.",
+        reply_markup=get_admin_text_settings_kb(),
+    )
+
+
+@router.callback_query(AdminCb.filter(F.action == "date_ranges"))
+async def admin_date_ranges_menu(callback: CallbackQuery, config: Config) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📆 <b>Работа с диапазонами дат</b>\n\nВыберите действие:",
+        reply_markup=get_admin_date_ranges_kb(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(AdminCb.filter((F.action == "range_open") | (F.action == "range_close")))
+async def admin_range_action_start(callback: CallbackQuery, callback_data: AdminCb, config: Config, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    mode = "open" if callback_data.action == "range_open" else "close"
+    await state.set_state(AdminStates.range_dates_input)
+    await state.update_data(range_action_mode=mode)
+    title = "открыть" if mode == "open" else "закрыть"
+    await callback.message.edit_text(
+        f"📆 <b>{title.title()} диапазон дат</b>\n\n"
+        "Отправьте две даты в формате:\n"
+        "<code>2026-04-01 2026-04-10</code>",
+        reply_markup=get_back_menu_kb(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.range_dates_input)
+async def admin_save_range_action(message: Message, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    mode = data.get("range_action_mode")
+    parsed = parse_date_range_input(message.text or "")
+    if not parsed:
+        await message.answer("Не удалось распознать диапазон. Используйте формат <code>YYYY-MM-DD YYYY-MM-DD</code>.")
+        return
+    start_day, end_day = parsed
+    if mode == "open":
+        count = await db.add_work_days_range(start_day, end_day)
+        await db.set_day_closed_range(start_day, end_day, False)
+        text = (
+            f"✅ Диапазон открыт: <b>{human_date(start_day)}</b> — <b>{human_date(end_day)}</b>.\n"
+            f"Обработано дней: <b>{count}</b>."
+        )
+    else:
+        count = await db.set_day_closed_range(start_day, end_day, True)
+        text = (
+            f"🚫 Диапазон закрыт: <b>{human_date(start_day)}</b> — <b>{human_date(end_day)}</b>.\n"
+            f"Обработано дней: <b>{count}</b>."
+        )
+    await state.clear()
+    await message.answer(text, reply_markup=get_admin_date_ranges_kb())

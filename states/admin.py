@@ -18,3 +18,5 @@ class AdminStates(StatesGroup):
     bulk_slots_time = State()
     copy_schedule_target = State()
 
+    edit_text_setting = State()
+    range_dates_input = State()

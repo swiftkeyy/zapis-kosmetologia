@@ -60,3 +60,7 @@ class SubscriptionCb(CallbackData, prefix="sub"):
 class ClientAdminCb(CallbackData, prefix="cli"):
     action: str
     user_id: int
+
+
+class TextSettingCb(CallbackData, prefix="txt"):
+    key: str

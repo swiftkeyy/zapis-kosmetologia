@@ -1,9 +1,32 @@
 from __future__ import annotations
 
-import aiosqlite
+from datetime import date, datetime, timedelta
 from typing import Any
 
+import aiosqlite
+
 from utils.default_data import CATEGORY_TITLES, DEFAULT_SERVICES
+
+
+DEFAULT_TEXT_SETTINGS: dict[str, str] = {
+    "welcome_text": (
+        "🌷 <b>Добро пожаловать!</b>\n\n"
+        "Это бот для записи к <b>Шаеховой Марие</b> "
+        "на косметологические услуги и массаж.\n\n"
+        "Через меню ниже вы можете:\n"
+        "• записаться на свободное время;\n"
+        "• посмотреть свою запись;\n"
+        "• открыть прайс;\n"
+        "• перейти в портфолио."
+    ),
+    "subscription_required_text": "Для записи необходимо подписаться на канал.",
+    "subscription_failed_text": "Подписка пока не подтверждена.",
+    "reminder_text": (
+        "⏰ <b>Напоминание</b>\n\n"
+        "Напоминаем, что вы записаны завтра к Шаеховой Марие в <b>{time}</b>.\n"
+        "Ждём вас ❤️"
+    ),
+}
 
 
 class Database:
@@ -78,6 +101,31 @@ class Database:
 
             await db.execute(
                 """
+                CREATE TABLE IF NOT EXISTS clients (
+                    user_id INTEGER PRIMARY KEY,
+                    username TEXT,
+                    full_name TEXT NOT NULL DEFAULT '',
+                    phone TEXT NOT NULL DEFAULT '',
+                    note TEXT NOT NULL DEFAULT '',
+                    is_blocked INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+            await db.execute(
+                """
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_active_user
                 ON appointments(user_id)
                 WHERE status = 'booked'
@@ -95,6 +143,8 @@ class Database:
             await db.commit()
 
         await self.seed_services()
+        await self.seed_text_settings()
+        await self.backfill_clients()
 
     async def _fetchall(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
         async with aiosqlite.connect(self.path) as db:
@@ -137,6 +187,88 @@ class Database:
                     ),
                 )
             await db.commit()
+
+    async def seed_text_settings(self) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            for key, value in DEFAULT_TEXT_SETTINGS.items():
+                await db.execute(
+                    """
+                    INSERT INTO settings(key, value)
+                    VALUES(?, ?)
+                    ON CONFLICT(key) DO NOTHING
+                    """,
+                    (key, value),
+                )
+            await db.commit()
+
+    async def backfill_clients(self) -> None:
+        rows = await self._fetchall(
+            """
+            SELECT
+                a.user_id,
+                COALESCE(MAX(a.username), '') AS username,
+                COALESCE(MAX(a.full_name), '') AS full_name,
+                COALESCE(MAX(a.phone), '') AS phone
+            FROM appointments a
+            GROUP BY a.user_id
+            """
+        )
+        async with aiosqlite.connect(self.path) as db:
+            for row in rows:
+                await db.execute(
+                    """
+                    INSERT INTO clients(user_id, username, full_name, phone)
+                    VALUES(?, ?, ?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET
+                        username = excluded.username,
+                        full_name = excluded.full_name,
+                        phone = excluded.phone,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (row["user_id"], row["username"], row["full_name"], row["phone"]),
+                )
+            await db.commit()
+
+    async def upsert_client(self, user_id: int, username: str | None, full_name: str, phone: str) -> None:
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                """
+                INSERT INTO clients(user_id, username, full_name, phone)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    username = excluded.username,
+                    full_name = excluded.full_name,
+                    phone = excluded.phone,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (user_id, username or "", full_name, phone),
+            )
+            await db.commit()
+
+    async def get_setting(self, key: str, default: str = "") -> str:
+        row = await self._fetchone("SELECT value FROM settings WHERE key = ?", (key,))
+        if not row:
+            return default
+        return row["value"]
+
+    async def set_setting(self, key: str, value: str) -> None:
+        await self._execute(
+            """
+            INSERT INTO settings(key, value, updated_at)
+            VALUES(?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (key, value),
+        )
+
+    async def get_text_settings(self) -> dict[str, str]:
+        data = dict(DEFAULT_TEXT_SETTINGS)
+        rows = await self._fetchall("SELECT key, value FROM settings")
+        for row in rows:
+            data[row["key"]] = row["value"]
+        return data
 
     async def get_services(self, only_active: bool = True) -> list[dict[str, Any]]:
         query = """
@@ -217,12 +349,38 @@ class Database:
             )
             await db.commit()
 
+    async def add_work_days_range(self, start_day: str, end_day: str) -> int:
+        start = date.fromisoformat(start_day)
+        end = date.fromisoformat(end_day)
+        if end < start:
+            start, end = end, start
+        count = 0
+        current = start
+        while current <= end:
+            await self.add_work_day(current.isoformat())
+            count += 1
+            current += timedelta(days=1)
+        return count
+
     async def set_day_closed(self, day: str, is_closed: bool = True) -> None:
         await self.add_work_day(day)
         await self._execute(
             "UPDATE work_days SET is_closed = ? WHERE date = ?",
             (1 if is_closed else 0, day),
         )
+
+    async def set_day_closed_range(self, start_day: str, end_day: str, is_closed: bool) -> int:
+        start = date.fromisoformat(start_day)
+        end = date.fromisoformat(end_day)
+        if end < start:
+            start, end = end, start
+        count = 0
+        current = start
+        while current <= end:
+            await self.set_day_closed(current.isoformat(), is_closed=is_closed)
+            count += 1
+            current += timedelta(days=1)
+        return count
 
     async def get_work_day(self, day: str) -> dict[str, Any] | None:
         return await self._fetchone(
@@ -259,8 +417,6 @@ class Database:
         return True
 
     async def get_available_dates(self, days_ahead: int = 31) -> list[str]:
-        from datetime import date, timedelta
-
         start_date = date.today().isoformat()
         end_date = (date.today() + timedelta(days=days_ahead)).isoformat()
         return [
@@ -364,13 +520,15 @@ class Database:
         service_id: int,
         slot_id: int,
     ) -> int:
-        return await self._execute(
+        appointment_id = await self._execute(
             """
             INSERT INTO appointments(user_id, username, full_name, phone, service_id, slot_id, status)
             VALUES(?, ?, ?, ?, ?, ?, 'booked')
             """,
             (user_id, username, full_name, phone, service_id, slot_id),
         )
+        await self.upsert_client(user_id, username, full_name, phone)
+        return appointment_id
 
     async def get_appointment(self, appointment_id: int) -> dict[str, Any] | None:
         return await self._fetchone(
@@ -504,26 +662,26 @@ class Database:
             await db.commit()
         return appointments
 
-
-
     async def search_clients(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         pattern = f"%{query.strip()}%"
         return await self._fetchall(
             """
             SELECT
-                a.user_id,
-                MAX(COALESCE(a.full_name, '')) AS full_name,
-                MAX(COALESCE(a.phone, '')) AS phone,
-                MAX(COALESCE(a.username, '')) AS username,
-                SUM(CASE WHEN a.status = 'booked' THEN 1 ELSE 0 END) AS active_count,
-                COUNT(*) AS total_visits
-            FROM appointments a
-            WHERE CAST(a.user_id AS TEXT) LIKE ?
-               OR COALESCE(a.full_name, '') LIKE ?
-               OR COALESCE(a.phone, '') LIKE ?
-               OR COALESCE(a.username, '') LIKE ?
-            GROUP BY a.user_id
-            ORDER BY total_visits DESC, full_name
+                c.user_id,
+                c.full_name,
+                c.phone,
+                c.username,
+                c.is_blocked,
+                COALESCE(SUM(CASE WHEN a.status = 'booked' THEN 1 ELSE 0 END), 0) AS active_count,
+                COALESCE(COUNT(a.id), 0) AS total_visits
+            FROM clients c
+            LEFT JOIN appointments a ON a.user_id = c.user_id
+            WHERE CAST(c.user_id AS TEXT) LIKE ?
+               OR COALESCE(c.full_name, '') LIKE ?
+               OR COALESCE(c.phone, '') LIKE ?
+               OR COALESCE(c.username, '') LIKE ?
+            GROUP BY c.user_id, c.full_name, c.phone, c.username, c.is_blocked
+            ORDER BY c.is_blocked DESC, total_visits DESC, c.full_name
             LIMIT ?
             """,
             (pattern, pattern, pattern, pattern, limit),
@@ -533,17 +691,20 @@ class Database:
         return await self._fetchone(
             """
             SELECT
-                a.user_id,
-                MAX(COALESCE(a.full_name, '')) AS full_name,
-                MAX(COALESCE(a.phone, '')) AS phone,
-                MAX(COALESCE(a.username, '')) AS username,
-                SUM(CASE WHEN a.status = 'booked' THEN 1 ELSE 0 END) AS active_count,
-                SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
-                COUNT(*) AS total_visits,
+                c.user_id,
+                c.full_name,
+                c.phone,
+                c.username,
+                c.note,
+                c.is_blocked,
+                COALESCE(SUM(CASE WHEN a.status = 'booked' THEN 1 ELSE 0 END), 0) AS active_count,
+                COALESCE(SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled_count,
+                COALESCE(COUNT(a.id), 0) AS total_visits,
                 MAX(a.created_at) AS last_created_at
-            FROM appointments a
-            WHERE a.user_id = ?
-            GROUP BY a.user_id
+            FROM clients c
+            LEFT JOIN appointments a ON a.user_id = c.user_id
+            WHERE c.user_id = ?
+            GROUP BY c.user_id, c.full_name, c.phone, c.username, c.note, c.is_blocked
             """,
             (user_id,),
         )
@@ -570,6 +731,26 @@ class Database:
             LIMIT ?
             """,
             (user_id, limit),
+        )
+
+    async def set_client_blocked(self, user_id: int, is_blocked: bool) -> None:
+        await self._execute(
+            "UPDATE clients SET is_blocked = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+            (1 if is_blocked else 0, user_id),
+        )
+
+    async def is_client_blocked(self, user_id: int) -> bool:
+        row = await self._fetchone("SELECT is_blocked FROM clients WHERE user_id = ?", (user_id,))
+        return bool(row and row["is_blocked"])
+
+    async def get_blocked_clients(self) -> list[dict[str, Any]]:
+        return await self._fetchall(
+            """
+            SELECT user_id, full_name, phone, username, is_blocked
+            FROM clients
+            WHERE is_blocked = 1
+            ORDER BY full_name, user_id
+            """
         )
 
     async def add_time_slots_bulk(self, day: str, times: list[str]) -> list[str]:
@@ -621,6 +802,57 @@ class Database:
             "skipped": skipped,
             "target_closed": bool(source_work_day["is_closed"]),
         }
+
+    async def get_stats_between(self, start_day: str, end_day: str) -> dict[str, Any]:
+        summary = await self._fetchone(
+            """
+            SELECT
+                COUNT(a.id) AS total,
+                COALESCE(SUM(CASE WHEN a.status = 'booked' THEN 1 ELSE 0 END), 0) AS booked_count,
+                COALESCE(SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled_count,
+                COALESCE(SUM(CASE WHEN a.status = 'booked' THEN s.price ELSE 0 END), 0) AS booked_revenue
+            FROM appointments a
+            JOIN time_slots ts ON ts.id = a.slot_id
+            JOIN services s ON s.id = a.service_id
+            WHERE ts.work_date >= ? AND ts.work_date <= ?
+            """,
+            (start_day, end_day),
+        ) or {"total": 0, "booked_count": 0, "cancelled_count": 0, "booked_revenue": 0}
+
+        popular_services = await self._fetchall(
+            """
+            SELECT s.name, COUNT(a.id) AS qty
+            FROM appointments a
+            JOIN time_slots ts ON ts.id = a.slot_id
+            JOIN services s ON s.id = a.service_id
+            WHERE ts.work_date >= ? AND ts.work_date <= ?
+            GROUP BY s.id, s.name
+            ORDER BY qty DESC, s.name
+            LIMIT 5
+            """,
+            (start_day, end_day),
+        )
+
+        free_tomorrow = await self._fetchone(
+            """
+            SELECT COUNT(ts.id) AS cnt
+            FROM time_slots ts
+            JOIN work_days wd ON wd.date = ts.work_date
+            LEFT JOIN appointments a ON a.slot_id = ts.id AND a.status = 'booked'
+            WHERE ts.work_date = ?
+              AND ts.is_active = 1
+              AND wd.is_closed = 0
+              AND a.id IS NULL
+            """,
+            ((date.today() + timedelta(days=1)).isoformat(),),
+        )
+
+        blocked = await self._fetchone("SELECT COUNT(*) AS cnt FROM clients WHERE is_blocked = 1")
+
+        summary["popular_services"] = popular_services
+        summary["free_tomorrow"] = int((free_tomorrow or {"cnt": 0})["cnt"])
+        summary["blocked_clients"] = int((blocked or {"cnt": 0})["cnt"])
+        return summary
 
     async def get_price_text_html(self) -> str:
         services = await self.get_services(only_active=True)

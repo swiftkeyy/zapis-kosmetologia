@@ -19,6 +19,7 @@ from keyboards.callbacks import (
     SlotAdminCb,
     SlotCb,
     SubscriptionCb,
+    TextSettingCb,
 )
 from utils.default_data import CATEGORY_TITLES
 from utils.helpers import get_month_matrix, month_title
@@ -45,12 +46,7 @@ def get_back_menu_kb() -> InlineKeyboardMarkup:
 def get_subscription_kb(channel_link: str) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(InlineKeyboardButton(text="📢 Подписаться", url=channel_link))
-    kb.row(
-        InlineKeyboardButton(
-            text="✅ Проверить подписку",
-            callback_data=SubscriptionCb(action="check").pack(),
-        )
-    )
+    kb.row(InlineKeyboardButton(text="✅ Проверить подписку", callback_data=SubscriptionCb(action="check").pack()))
     kb.row(InlineKeyboardButton(text="⬅️ В меню", callback_data=MenuCb(action="main").pack()))
     return kb.as_markup()
 
@@ -143,10 +139,7 @@ def get_categories_kb() -> InlineKeyboardMarkup:
 def get_services_kb(services: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for service in services:
-        kb.button(
-            text=f"{service['name']} — {service['price']}₽",
-            callback_data=ServiceCb(service_id=service["id"]),
-        )
+        kb.button(text=f"{service['name']} — {service['price']}₽", callback_data=ServiceCb(service_id=service["id"]))
     kb.button(text="⬅️ В меню", callback_data=MenuCb(action="main"))
     kb.adjust(1)
     return kb.as_markup()
@@ -193,9 +186,13 @@ def get_admin_menu_kb() -> InlineKeyboardMarkup:
     kb.button(text="🗑 Удалить слот", callback_data=AdminCb(action="delete_slot"))
     kb.button(text="💰 Управление услугами", callback_data=AdminCb(action="prices"))
     kb.button(text="👥 Клиенты", callback_data=AdminCb(action="clients"))
+    kb.button(text="⛔ Стоп-лист", callback_data=AdminCb(action="blocked_clients"))
     kb.button(text="📋 Записи по дате", callback_data=AdminCb(action="appointments_by_date"))
     kb.button(text="📅 Расписание на дату", callback_data=AdminCb(action="schedule"))
     kb.button(text="📎 Копировать расписание", callback_data=AdminCb(action="copy_schedule"))
+    kb.button(text="📊 Статистика", callback_data=AdminCb(action="statistics"))
+    kb.button(text="📝 Настройки текстов", callback_data=AdminCb(action="text_settings"))
+    kb.button(text="📆 Диапазоны дат", callback_data=AdminCb(action="date_ranges"))
     kb.button(text="🚫 Закрыть день", callback_data=AdminCb(action="close_day"))
     kb.button(text="❌ Отменить запись клиента", callback_data=AdminCb(action="cancel_client"))
     kb.button(text="⬅️ В меню", callback_data=MenuCb(action="main"))
@@ -252,10 +249,7 @@ def get_admin_service_card_kb(service_id: int, is_active: bool) -> InlineKeyboar
     kb = InlineKeyboardBuilder()
     kb.button(text="✏️ Изменить название", callback_data=ServiceAdminCb(action="edit_name", service_id=service_id))
     kb.button(text="💸 Изменить цену", callback_data=ServiceAdminCb(action="edit_price", service_id=service_id))
-    kb.button(
-        text="🙈 Скрыть" if is_active else "👁 Показать",
-        callback_data=ServiceAdminCb(action="toggle", service_id=service_id),
-    )
+    kb.button(text="🙈 Скрыть" if is_active else "👁 Показать", callback_data=ServiceAdminCb(action="toggle", service_id=service_id))
     kb.button(text="🗑 Удалить", callback_data=ServiceAdminCb(action="delete", service_id=service_id))
     kb.button(text="⬅️ К списку услуг", callback_data=ServiceAdminCb(action="back", service_id=service_id))
     kb.adjust(1)
@@ -267,10 +261,7 @@ def get_admin_slots_delete_kb(slots: list[dict]) -> InlineKeyboardMarkup:
     for slot in slots:
         status = "⛔ занято" if slot["is_booked"] else "🆓"
         active = "" if slot["is_active"] else " (скрыт)"
-        kb.button(
-            text=f"{slot['time']} {status}{active}",
-            callback_data=SlotAdminCb(action="delete", slot_id=slot["id"]),
-        )
+        kb.button(text=f"{slot['time']} {status}{active}", callback_data=SlotAdminCb(action="delete", slot_id=slot["id"]))
     kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
     kb.adjust(1)
     return kb.as_markup()
@@ -279,10 +270,7 @@ def get_admin_slots_delete_kb(slots: list[dict]) -> InlineKeyboardMarkup:
 def get_admin_appointments_kb(appointments: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for item in appointments:
-        kb.button(
-            text=f"{item['time']} — {item['full_name']}",
-            callback_data=AppointmentAdminCb(action="view", appointment_id=item["id"]),
-        )
+        kb.button(text=f"{item['time']} — {item['full_name']}", callback_data=AppointmentAdminCb(action="view", appointment_id=item["id"]))
     kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
     kb.adjust(1)
     return kb.as_markup()
@@ -308,22 +296,19 @@ def get_admin_appointment_cancel_confirm_kb(appointment_id: int) -> InlineKeyboa
 def get_admin_transfer_slots_kb(appointment_id: int, slots: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for slot in slots:
-        kb.button(
-            text=slot["time"],
-            callback_data=AppointmentMoveSlotCb(appointment_id=appointment_id, slot_id=slot["id"]),
-        )
+        kb.button(text=slot["time"], callback_data=AppointmentMoveSlotCb(appointment_id=appointment_id, slot_id=slot["id"]))
     kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
     kb.adjust(3, repeat=True)
     return kb.as_markup()
 
 
-
 def get_admin_clients_kb(clients: list[dict]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for item in clients:
-        username = f" @{item['username']}" if item.get('username') else ""
+        username = f" @{item['username']}" if item.get("username") else ""
+        blocked = " ⛔" if item.get("is_blocked") else ""
         kb.button(
-            text=f"{item['full_name']} | {item['phone']}{username}",
+            text=f"{item['full_name']} | {item['phone']}{username}{blocked}",
             callback_data=ClientAdminCb(action="view", user_id=item["user_id"]),
         )
     kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
@@ -331,9 +316,44 @@ def get_admin_clients_kb(clients: list[dict]) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
-def get_admin_client_card_kb(user_id: int) -> InlineKeyboardMarkup:
+def get_admin_client_card_kb(user_id: int, is_blocked: bool = False) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    kb.button(
+        text="✅ Убрать из стоп-листа" if is_blocked else "⛔ В стоп-лист",
+        callback_data=ClientAdminCb(action="toggle_block", user_id=user_id),
+    )
     kb.button(text="🔎 Новый поиск", callback_data=AdminCb(action="clients"))
+    kb.button(text="⛔ Открыть стоп-лист", callback_data=AdminCb(action="blocked_clients"))
+    kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def get_admin_stats_menu_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📅 Сегодня", callback_data=AdminCb(action="stats_today"))
+    kb.button(text="🗓 Неделя", callback_data=AdminCb(action="stats_week"))
+    kb.button(text="📆 Месяц", callback_data=AdminCb(action="stats_month"))
+    kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def get_admin_text_settings_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="👋 Приветствие", callback_data=TextSettingCb(key="welcome_text"))
+    kb.button(text="📢 Текст подписки", callback_data=TextSettingCb(key="subscription_required_text"))
+    kb.button(text="✅ Текст проверки подписки", callback_data=TextSettingCb(key="subscription_failed_text"))
+    kb.button(text="⏰ Текст напоминания", callback_data=TextSettingCb(key="reminder_text"))
+    kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def get_admin_date_ranges_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🟢 Открыть диапазон дат", callback_data=AdminCb(action="range_open"))
+    kb.button(text="🔴 Закрыть диапазон дат", callback_data=AdminCb(action="range_close"))
     kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
     kb.adjust(1)
     return kb.as_markup()

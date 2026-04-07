@@ -16,6 +16,14 @@ START_TEXT = (
 )
 
 
+TEXT_SETTING_TITLES = {
+    "welcome_text": "Приветствие",
+    "subscription_required_text": "Текст подписки",
+    "subscription_failed_text": "Текст проверки подписки",
+    "reminder_text": "Текст напоминания",
+}
+
+
 def format_appointment_html(appointment: dict) -> str:
     category_title = CATEGORY_TITLES.get(appointment["category"], appointment["category"])
     return (
@@ -77,9 +85,10 @@ def format_channel_reschedule_notification(old_appointment: dict, new_appointmen
     )
 
 
-
 def format_client_history_html(profile: dict, history: list[dict]) -> str:
-    username = f"@{profile['username']}" if profile.get('username') else "—"
+    username = f"@{profile['username']}" if profile.get("username") else "—"
+    blocked = "да" if profile.get("is_blocked") else "нет"
+    note = profile.get("note") or "—"
     lines = [
         "👥 <b>Карточка клиента</b>",
         "",
@@ -87,6 +96,8 @@ def format_client_history_html(profile: dict, history: list[dict]) -> str:
         f"<b>Телефон:</b> {profile['phone']}",
         f"<b>Telegram:</b> {username}",
         f"<b>User ID:</b> <code>{profile['user_id']}</code>",
+        f"<b>Стоп-лист:</b> {blocked}",
+        f"<b>Заметка:</b> {note}",
         f"<b>Всего записей:</b> {profile.get('total_visits', 0)}",
         f"<b>Активных:</b> {profile.get('active_count', 0)}",
         f"<b>Отмен:</b> {profile.get('cancelled_count', 0)}",
@@ -98,10 +109,31 @@ def format_client_history_html(profile: dict, history: list[dict]) -> str:
     else:
         for item in history[:10]:
             status = {
-                'booked': 'активна',
-                'cancelled': 'отменена',
-            }.get(item['status'], item['status'])
-            lines.append(
-                f"• {human_date(item['work_date'])}, <b>{item['time']}</b> — {item['service_name']} ({status})"
-            )
+                "booked": "активна",
+                "cancelled": "отменена",
+            }.get(item["status"], item["status"])
+            lines.append(f"• {human_date(item['work_date'])}, <b>{item['time']}</b> — {item['service_name']} ({status})")
+    return "\n".join(lines)
+
+
+def format_stats_html(title: str, start_day: str, end_day: str, stats: dict) -> str:
+    lines = [
+        f"📊 <b>{title}</b>",
+        "",
+        f"<b>Период:</b> {human_date(start_day)} — {human_date(end_day)}",
+        f"<b>Всего записей:</b> {stats.get('total', 0)}",
+        f"<b>Активных:</b> {stats.get('booked_count', 0)}",
+        f"<b>Отмен:</b> {stats.get('cancelled_count', 0)}",
+        f"<b>Потенциальная выручка:</b> {stats.get('booked_revenue', 0)}₽",
+        f"<b>Свободных слотов на завтра:</b> {stats.get('free_tomorrow', 0)}",
+        f"<b>Клиентов в стоп-листе:</b> {stats.get('blocked_clients', 0)}",
+        "",
+        "<b>Популярные услуги:</b>",
+    ]
+    popular = stats.get("popular_services") or []
+    if not popular:
+        lines.append("Пока недостаточно данных.")
+    else:
+        for item in popular:
+            lines.append(f"• {item['name']} — {item['qty']} запис.")
     return "\n".join(lines)

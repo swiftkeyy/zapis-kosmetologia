@@ -27,15 +27,17 @@ class ReminderScheduler:
             self.scheduler.shutdown(wait=False)
 
     async def send_reminder(self, user_id: int, appointment_time: str) -> None:
-        text = (
-            f"⏰ <b>Напоминание</b>\n\n"
-            f"Напоминаем, что вы записаны завтра к Шаеховой Марие в <b>{appointment_time}</b>.\n"
-            f"Ждём вас ❤️"
+        template = await self.db.get_setting(
+            "reminder_text",
+            "⏰ <b>Напоминание</b>\n\nНапоминаем, что вы записаны завтра к Шаеховой Марие в <b>{time}</b>.\nЖдём вас ❤️",
         )
+        try:
+            text = template.format(time=appointment_time)
+        except Exception:
+            text = template
         try:
             await self.bot.send_message(user_id, text, parse_mode="HTML")
         except Exception:
-            # Пользователь мог заблокировать бота или удалить чат.
             pass
 
     async def schedule_appointment_reminder(self, appointment_id: int) -> str | None:
