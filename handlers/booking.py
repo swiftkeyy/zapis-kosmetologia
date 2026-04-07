@@ -450,8 +450,7 @@ async def cancel_my_booking(
     scheduler.remove_job(appointment.get("reminder_job_id"))
     await db.cancel_appointment(appointment["id"], cancelled_by="user")
     await db.update_appointment_reminder_job(appointment["id"], None)
-
-<<<<<<< HEAD
+    
     try:
         await bot.send_message(
             config.ADMIN_ID,
@@ -460,7 +459,6 @@ async def cancel_my_booking(
         )
     except Exception:
         pass
-=======
     for admin_id in config.ADMIN_IDS:
         try:
             await bot.send_message(
@@ -470,7 +468,7 @@ async def cancel_my_booking(
             )
         except Exception:
             pass
->>>>>>> a551ec1 (fix indentation in booking)
+        a551ec1 (fix indentation in booking)
 
     try:
         await bot.send_message(
