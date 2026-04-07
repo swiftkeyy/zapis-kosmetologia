@@ -504,6 +504,124 @@ class Database:
             await db.commit()
         return appointments
 
+
+
+    async def search_clients(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        pattern = f"%{query.strip()}%"
+        return await self._fetchall(
+            """
+            SELECT
+                a.user_id,
+                MAX(COALESCE(a.full_name, '')) AS full_name,
+                MAX(COALESCE(a.phone, '')) AS phone,
+                MAX(COALESCE(a.username, '')) AS username,
+                SUM(CASE WHEN a.status = 'booked' THEN 1 ELSE 0 END) AS active_count,
+                COUNT(*) AS total_visits
+            FROM appointments a
+            WHERE CAST(a.user_id AS TEXT) LIKE ?
+               OR COALESCE(a.full_name, '') LIKE ?
+               OR COALESCE(a.phone, '') LIKE ?
+               OR COALESCE(a.username, '') LIKE ?
+            GROUP BY a.user_id
+            ORDER BY total_visits DESC, full_name
+            LIMIT ?
+            """,
+            (pattern, pattern, pattern, pattern, limit),
+        )
+
+    async def get_client_profile(self, user_id: int) -> dict[str, Any] | None:
+        return await self._fetchone(
+            """
+            SELECT
+                a.user_id,
+                MAX(COALESCE(a.full_name, '')) AS full_name,
+                MAX(COALESCE(a.phone, '')) AS phone,
+                MAX(COALESCE(a.username, '')) AS username,
+                SUM(CASE WHEN a.status = 'booked' THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE WHEN a.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled_count,
+                COUNT(*) AS total_visits,
+                MAX(a.created_at) AS last_created_at
+            FROM appointments a
+            WHERE a.user_id = ?
+            GROUP BY a.user_id
+            """,
+            (user_id,),
+        )
+
+    async def get_client_history(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        return await self._fetchall(
+            """
+            SELECT
+                a.id,
+                a.status,
+                a.created_at,
+                a.cancelled_at,
+                a.cancelled_by,
+                ts.work_date,
+                ts.time,
+                s.name AS service_name,
+                s.category,
+                s.price
+            FROM appointments a
+            JOIN time_slots ts ON ts.id = a.slot_id
+            JOIN services s ON s.id = a.service_id
+            WHERE a.user_id = ?
+            ORDER BY ts.work_date DESC, ts.time DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        )
+
+    async def add_time_slots_bulk(self, day: str, times: list[str]) -> list[str]:
+        saved: list[str] = []
+        for time_value in times:
+            await self.add_time_slot(day, time_value)
+            saved.append(time_value)
+        return saved
+
+    async def copy_schedule_to_date(self, source_date: str, target_date: str) -> dict[str, int | bool]:
+        source_work_day = await self.get_work_day(source_date)
+        if not source_work_day:
+            return {"copied": 0, "skipped": 0, "target_closed": False}
+
+        source_slots = await self._fetchall(
+            """
+            SELECT time, is_active
+            FROM time_slots
+            WHERE work_date = ?
+            ORDER BY time
+            """,
+            (source_date,),
+        )
+
+        await self.add_work_day(target_date)
+        await self.set_day_closed(target_date, bool(source_work_day["is_closed"]))
+
+        copied = 0
+        skipped = 0
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute("PRAGMA foreign_keys = ON;")
+            for slot in source_slots:
+                cursor = await db.execute(
+                    """
+                    INSERT INTO time_slots(work_date, time, is_active)
+                    VALUES(?, ?, ?)
+                    ON CONFLICT(work_date, time) DO NOTHING
+                    """,
+                    (target_date, slot["time"], slot["is_active"]),
+                )
+                if cursor.rowcount and cursor.rowcount > 0:
+                    copied += 1
+                else:
+                    skipped += 1
+            await db.commit()
+
+        return {
+            "copied": copied,
+            "skipped": skipped,
+            "target_closed": bool(source_work_day["is_closed"]),
+        }
+
     async def get_price_text_html(self) -> str:
         services = await self.get_services(only_active=True)
         massage = [item for item in services if item["category"] == "massage"]

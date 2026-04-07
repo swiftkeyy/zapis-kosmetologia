@@ -13,6 +13,7 @@ from keyboards.callbacks import (
     AdminCb,
     AppointmentAdminCb,
     AppointmentMoveSlotCb,
+    ClientAdminCb,
     CalendarCb,
     CategoryCb,
     MenuCb,
@@ -25,6 +26,8 @@ from keyboards.inline import (
     get_admin_appointment_manage_kb,
     get_admin_appointments_kb,
     get_admin_category_kb,
+    get_admin_client_card_kb,
+    get_admin_clients_kb,
     get_admin_menu_kb,
     get_admin_price_menu_kb,
     get_admin_service_card_kb,
@@ -41,6 +44,7 @@ from utils.helpers import human_date
 from utils.messages import (
     format_channel_cancellation_notification,
     format_channel_reschedule_notification,
+    format_client_history_html,
 )
 
 
@@ -286,7 +290,7 @@ async def admin_calendar_nav(
     callback_data: CalendarCb,
     config: Config,
 ) -> None:
-    if callback_data.scope not in {"ad", "as", "ds", "sd", "cd", "cc", "ap", "mv"}:
+    if callback_data.scope not in {"ad", "as", "ds", "sd", "cd", "cc", "ap", "mv", "bs", "cp1", "cp2"}:
         return
 
     if not is_admin(callback.from_user.id, config):
@@ -1055,3 +1059,182 @@ async def admin_finish_move_appointment(
         reply_markup=get_admin_appointment_manage_kb(updated_appointment["id"]),
     )
     await callback.answer("Запись перенесена")
+
+@router.callback_query(AdminCb.filter(F.action == "clients"))
+async def admin_clients_menu(callback: CallbackQuery, config: Config, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    await state.set_state(AdminStates.search_client_query)
+    await callback.message.edit_text(
+        "👥 <b>Поиск клиента</b>\n\nВведите имя, телефон, username или user id:",
+        reply_markup=get_back_menu_kb(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.search_client_query)
+async def admin_search_client(message: Message, state: FSMContext, db: Database) -> None:
+    query = (message.text or "").strip()
+    if len(query) < 2:
+        await message.answer("Введите минимум 2 символа для поиска.")
+        return
+    clients = await db.search_clients(query)
+    if not clients:
+        await message.answer("Клиенты не найдены.", reply_markup=get_admin_menu_kb())
+        await state.clear()
+        return
+    await state.clear()
+    await message.answer(
+        "👥 <b>Результаты поиска</b>\n\nВыберите клиента:",
+        reply_markup=get_admin_clients_kb(clients),
+    )
+
+
+@router.callback_query(ClientAdminCb.filter(F.action == "view"))
+async def admin_view_client(callback: CallbackQuery, callback_data: ClientAdminCb, config: Config, db: Database) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    profile = await db.get_client_profile(callback_data.user_id)
+    if not profile:
+        await callback.answer("Клиент не найден.", show_alert=True)
+        return
+    history = await db.get_client_history(callback_data.user_id)
+    await callback.message.edit_text(
+        format_client_history_html(profile, history),
+        reply_markup=get_admin_client_card_kb(callback_data.user_id),
+    )
+    await callback.answer()
+
+
+@router.callback_query(AdminCb.filter(F.action == "bulk_add_slots"))
+async def admin_bulk_add_slots(callback: CallbackQuery, config: Config) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    await open_admin_calendar(callback, "bs", "🕘 <b>Массово добавить слоты</b>\n\nВыберите дату:")
+
+
+@router.callback_query(CalendarCb.filter((F.scope == "bs") & (F.day > 0)))
+async def admin_pick_bulk_slots_date(
+    callback: CallbackQuery,
+    callback_data: CalendarCb,
+    config: Config,
+    db: Database,
+    state: FSMContext,
+) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    selected = date(callback_data.year, callback_data.month, callback_data.day).isoformat()
+    await db.add_work_day(selected)
+    await state.set_state(AdminStates.bulk_slots_time)
+    await state.update_data(selected_date=selected)
+    await callback.message.edit_text(
+        f"🕘 <b>Массово добавить слоты</b>\n\nДата: <b>{human_date(selected)}</b>\n\n"
+        "Отправьте время через запятую, ; или с новой строки.\n"
+        "Пример:\n<code>10:00, 11:30, 14:00</code>",
+        reply_markup=get_back_menu_kb(),
+    )
+    await callback.answer()
+
+
+@router.message(AdminStates.bulk_slots_time)
+async def admin_save_bulk_slots(message: Message, state: FSMContext, db: Database) -> None:
+    data = await state.get_data()
+    selected_date = data.get("selected_date")
+    if not selected_date:
+        await state.clear()
+        await message.answer("Дата не найдена.", reply_markup=get_admin_menu_kb())
+        return
+    raw = (message.text or "").replace(";", ",").replace("\n", ",")
+    raw_items = [item.strip() for item in raw.split(",") if item.strip()]
+    if not raw_items:
+        await message.answer("Укажите хотя бы одно время.")
+        return
+    valid_times: list[str] = []
+    for item in raw_items:
+        try:
+            datetime.strptime(item, "%H:%M")
+            valid_times.append(item)
+        except ValueError:
+            await message.answer(f"Некорректный формат времени: <code>{item}</code>")
+            return
+    saved = await db.add_time_slots_bulk(selected_date, valid_times)
+    await state.clear()
+    await message.answer(
+        f"✅ На <b>{human_date(selected_date)}</b> добавлены слоты:\n" + ", ".join(saved),
+        reply_markup=get_admin_menu_kb(),
+    )
+
+
+@router.callback_query(AdminCb.filter(F.action == "copy_schedule"))
+async def admin_copy_schedule_start(callback: CallbackQuery, config: Config, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    await state.clear()
+    await open_admin_calendar(callback, "cp1", "📎 <b>Копировать расписание</b>\n\nВыберите дату-источник:")
+
+
+@router.callback_query(CalendarCb.filter((F.scope == "cp1") & (F.day > 0)))
+async def admin_copy_schedule_pick_source(
+    callback: CallbackQuery,
+    callback_data: CalendarCb,
+    config: Config,
+    state: FSMContext,
+) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    source_date = date(callback_data.year, callback_data.month, callback_data.day).isoformat()
+    await state.set_state(AdminStates.copy_schedule_target)
+    await state.update_data(copy_source_date=source_date)
+
+    today = date.today()
+    max_date = today + timedelta(days=90)
+    await callback.message.edit_text(
+        f"📎 <b>Копировать расписание</b>\n\nИсточник: <b>{human_date(source_date)}</b>\nТеперь выберите дату назначения:",
+        reply_markup=build_calendar_keyboard(
+            scope="cp2",
+            year=today.year,
+            month=today.month,
+            enabled_dates=admin_enabled_dates(90),
+            min_date=today,
+            max_date=max_date,
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(CalendarCb.filter((F.scope == "cp2") & (F.day > 0)))
+async def admin_copy_schedule_pick_target(
+    callback: CallbackQuery,
+    callback_data: CalendarCb,
+    config: Config,
+    db: Database,
+    state: FSMContext,
+) -> None:
+    if not is_admin(callback.from_user.id, config):
+        await callback.answer("Доступ запрещён.", show_alert=True)
+        return
+    data = await state.get_data()
+    source_date = data.get("copy_source_date")
+    if not source_date:
+        await state.clear()
+        await callback.message.edit_text("Не выбрана дата-источник.", reply_markup=get_admin_menu_kb())
+        await callback.answer()
+        return
+    target_date = date(callback_data.year, callback_data.month, callback_data.day).isoformat()
+    result = await db.copy_schedule_to_date(source_date, target_date)
+    await state.clear()
+    await callback.message.edit_text(
+        "📎 <b>Расписание скопировано</b>\n\n"
+        f"Источник: <b>{human_date(source_date)}</b>\n"
+        f"Назначение: <b>{human_date(target_date)}</b>\n"
+        f"Добавлено слотов: <b>{result['copied']}</b>\n"
+        f"Пропущено (уже существовали): <b>{result['skipped']}</b>",
+        reply_markup=get_admin_menu_kb(),
+    )
+    await callback.answer()

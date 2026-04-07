@@ -9,6 +9,7 @@ from keyboards.callbacks import (
     AdminCb,
     AppointmentAdminCb,
     AppointmentMoveSlotCb,
+    ClientAdminCb,
     CalendarCb,
     CategoryCb,
     ConfirmCb,
@@ -313,4 +314,26 @@ def get_admin_transfer_slots_kb(appointment_id: int, slots: list[dict]) -> Inlin
         )
     kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
     kb.adjust(3, repeat=True)
+    return kb.as_markup()
+
+
+
+def get_admin_clients_kb(clients: list[dict]) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    for item in clients:
+        username = f" @{item['username']}" if item.get('username') else ""
+        kb.button(
+            text=f"{item['full_name']} | {item['phone']}{username}",
+            callback_data=ClientAdminCb(action="view", user_id=item["user_id"]),
+        )
+    kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
+    kb.adjust(1)
+    return kb.as_markup()
+
+
+def get_admin_client_card_kb(user_id: int) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔎 Новый поиск", callback_data=AdminCb(action="clients"))
+    kb.button(text="⬅️ В админ-панель", callback_data=MenuCb(action="admin"))
+    kb.adjust(1)
     return kb.as_markup()

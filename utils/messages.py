@@ -75,3 +75,33 @@ def format_channel_reschedule_notification(old_appointment: dict, new_appointmen
         f"Было: <b>{human_date(old_appointment['work_date'])}</b> в <b>{old_appointment['time']}</b>\n"
         f"Стало: <b>{human_date(new_appointment['work_date'])}</b> в <b>{new_appointment['time']}</b>"
     )
+
+
+
+def format_client_history_html(profile: dict, history: list[dict]) -> str:
+    username = f"@{profile['username']}" if profile.get('username') else "—"
+    lines = [
+        "👥 <b>Карточка клиента</b>",
+        "",
+        f"<b>Имя:</b> {profile['full_name']}",
+        f"<b>Телефон:</b> {profile['phone']}",
+        f"<b>Telegram:</b> {username}",
+        f"<b>User ID:</b> <code>{profile['user_id']}</code>",
+        f"<b>Всего записей:</b> {profile.get('total_visits', 0)}",
+        f"<b>Активных:</b> {profile.get('active_count', 0)}",
+        f"<b>Отмен:</b> {profile.get('cancelled_count', 0)}",
+        "",
+        "<b>Последние записи:</b>",
+    ]
+    if not history:
+        lines.append("История пуста.")
+    else:
+        for item in history[:10]:
+            status = {
+                'booked': 'активна',
+                'cancelled': 'отменена',
+            }.get(item['status'], item['status'])
+            lines.append(
+                f"• {human_date(item['work_date'])}, <b>{item['time']}</b> — {item['service_name']} ({status})"
+            )
+    return "\n".join(lines)

@@ -13,3 +13,8 @@ class AdminStates(StatesGroup):
 
     transfer_choose_date = State()
     transfer_choose_slot = State()
+
+    search_client_query = State()
+    bulk_slots_time = State()
+    copy_schedule_target = State()
+

@@ -55,3 +55,8 @@ class AppointmentMoveSlotCb(CallbackData, prefix="ams"):
 
 class SubscriptionCb(CallbackData, prefix="sub"):
     action: str
+
+
+class ClientAdminCb(CallbackData, prefix="cli"):
+    action: str
+    user_id: int

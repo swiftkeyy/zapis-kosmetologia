@@ -13,7 +13,6 @@ load_dotenv(BASE_DIR / ".env")
 @dataclass(slots=True)
 class Config:
     BOT_TOKEN: str
-
     ADMIN_IDS: list[int] = field(default_factory=list)
     ADMIN_ID: int = 0
 
@@ -21,7 +20,7 @@ class Config:
     SUBSCRIBE_CHANNEL_LINK: str = ""
     SCHEDULE_CHANNEL_ID: int = 0
 
-    # совместимость со старым кодом
+    # Обратная совместимость со старым кодом
     CHANNEL_ID: int = 0
     CHANNEL_LINK: str = ""
 
@@ -34,7 +33,6 @@ def _parse_admin_ids() -> tuple[list[int], int]:
     admin_id_raw = os.getenv("ADMIN_ID", "").strip()
 
     admin_ids: list[int] = []
-
     if admin_ids_raw:
         admin_ids = [int(x.strip()) for x in admin_ids_raw.split(",") if x.strip()]
     elif admin_id_raw:
@@ -49,7 +47,7 @@ def _parse_admin_ids() -> tuple[list[int], int]:
 def load_config() -> Config:
     bot_token = os.getenv("BOT_TOKEN", "").strip()
     if not bot_token:
-        raise ValueError("Не найден BOT_TOKEN в переменных окружения")
+        raise ValueError("Не найден BOT_TOKEN в .env")
 
     admin_ids, first_admin_id = _parse_admin_ids()
 
@@ -57,7 +55,7 @@ def load_config() -> Config:
     subscribe_channel_link = os.getenv("SUBSCRIBE_CHANNEL_LINK", "").strip()
     schedule_channel_id = os.getenv("SCHEDULE_CHANNEL_ID", "").strip()
 
-    # старые переменные для совместимости
+    # Старые переменные для совместимости
     channel_id = os.getenv("CHANNEL_ID", "").strip()
     channel_link = os.getenv("CHANNEL_LINK", "").strip()
 
@@ -66,11 +64,11 @@ def load_config() -> Config:
     final_schedule_channel_id = schedule_channel_id or channel_id
 
     if not final_subscribe_channel_id:
-        raise ValueError("Не найден SUBSCRIBE_CHANNEL_ID или CHANNEL_ID")
+        raise ValueError("Не найден SUBSCRIBE_CHANNEL_ID или CHANNEL_ID в .env")
     if not final_subscribe_channel_link:
-        raise ValueError("Не найден SUBSCRIBE_CHANNEL_LINK или CHANNEL_LINK")
+        raise ValueError("Не найден SUBSCRIBE_CHANNEL_LINK или CHANNEL_LINK в .env")
     if not final_schedule_channel_id:
-        raise ValueError("Не найден SCHEDULE_CHANNEL_ID или CHANNEL_ID")
+        raise ValueError("Не найден SCHEDULE_CHANNEL_ID или CHANNEL_ID в .env")
 
     return Config(
         BOT_TOKEN=bot_token,
@@ -82,5 +80,5 @@ def load_config() -> Config:
         CHANNEL_ID=int(final_subscribe_channel_id),
         CHANNEL_LINK=final_subscribe_channel_link,
         DATABASE_PATH=os.getenv("DATABASE_PATH", "bot.db"),
-        TIMEZONE=os.getenv("TIMEZONE", "Europe/Samara"),
+        TIMEZONE=os.getenv("TIMEZONE", "Europe/Moscow"),
     )
