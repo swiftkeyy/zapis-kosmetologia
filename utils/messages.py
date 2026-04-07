@@ -4,6 +4,18 @@ from utils.default_data import CATEGORY_TITLES
 from utils.helpers import human_date
 
 
+START_TEXT = (
+    "🌷 <b>Добро пожаловать!</b>\n\n"
+    "Это бот для записи к <b>Шаеховой Марие</b> "
+    "на косметологические услуги и массаж.\n\n"
+    "Через меню ниже вы можете:\n"
+    "• записаться на свободное время;\n"
+    "• посмотреть свою запись;\n"
+    "• открыть прайс;\n"
+    "• перейти в портфолио."
+)
+
+
 def format_appointment_html(appointment: dict) -> str:
     category_title = CATEGORY_TITLES.get(appointment["category"], appointment["category"])
     return (
@@ -55,13 +67,11 @@ def format_channel_cancellation_notification(appointment: dict) -> str:
     )
 
 
-START_TEXT = (
-    "🌷 <b>Добро пожаловать!</b>\n\n"
-    "Это бот для записи к <b>Шаеховой Марие</b> "
-    "на косметологические услуги и массаж.\n\n"
-    "Через меню ниже вы можете:\n"
-    "• записаться на свободное время;\n"
-    "• посмотреть свою запись;\n"
-    "• открыть прайс;\n"
-    "• перейти в портфолио."
-)
+def format_channel_reschedule_notification(old_appointment: dict, new_appointment: dict) -> str:
+    return (
+        "🔁 <b>Перенос записи</b>\n\n"
+        f"Клиент: <b>{new_appointment['full_name']}</b>\n"
+        f"Услуга: <b>{new_appointment['service_name']}</b>\n"
+        f"Было: <b>{human_date(old_appointment['work_date'])}</b> в <b>{old_appointment['time']}</b>\n"
+        f"Стало: <b>{human_date(new_appointment['work_date'])}</b> в <b>{new_appointment['time']}</b>"
+    )

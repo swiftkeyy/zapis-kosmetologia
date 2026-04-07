@@ -48,5 +48,10 @@ class AppointmentAdminCb(CallbackData, prefix="app"):
     appointment_id: int
 
 
+class AppointmentMoveSlotCb(CallbackData, prefix="ams"):
+    appointment_id: int
+    slot_id: int
+
+
 class SubscriptionCb(CallbackData, prefix="sub"):
     action: str

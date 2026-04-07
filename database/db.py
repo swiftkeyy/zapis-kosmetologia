@@ -143,11 +143,10 @@ class Database:
             SELECT id, name, category, price, description, is_active
             FROM services
         """
-        params: tuple[Any, ...] = ()
         if only_active:
             query += " WHERE is_active = 1"
-        query += " ORDER BY id"
-        return await self._fetchall(query, params)
+        query += " ORDER BY category, id"
+        return await self._fetchall(query)
 
     async def get_services_by_category(self, category: str) -> list[dict[str, Any]]:
         return await self._fetchall(
@@ -159,6 +158,18 @@ class Database:
             """,
             (category,),
         )
+
+    async def get_services_for_admin(self, category: str | None = None) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, name, category, price, description, is_active
+            FROM services
+        """
+        params: tuple[Any, ...] = ()
+        if category:
+            query += " WHERE category = ?"
+            params = (category,)
+        query += " ORDER BY category, is_active DESC, id"
+        return await self._fetchall(query, params)
 
     async def get_service(self, service_id: int) -> dict[str, Any] | None:
         service = await self._fetchone(
@@ -182,11 +193,17 @@ class Database:
             (name, category, price, description),
         )
 
+    async def update_service_name(self, service_id: int, name: str) -> None:
+        await self._execute("UPDATE services SET name = ? WHERE id = ?", (name, service_id))
+
+    async def update_service_price(self, service_id: int, price: int) -> None:
+        await self._execute("UPDATE services SET price = ? WHERE id = ?", (price, service_id))
+
+    async def set_service_active(self, service_id: int, is_active: bool) -> None:
+        await self._execute("UPDATE services SET is_active = ? WHERE id = ?", (1 if is_active else 0, service_id))
+
     async def disable_service(self, service_id: int) -> None:
-        await self._execute(
-            "UPDATE services SET is_active = 0 WHERE id = ?",
-            (service_id,),
-        )
+        await self.set_service_active(service_id, False)
 
     async def add_work_day(self, day: str) -> None:
         async with aiosqlite.connect(self.path) as db:
@@ -394,6 +411,17 @@ class Database:
             (cancelled_by, appointment_id),
         )
 
+    async def reschedule_appointment(self, appointment_id: int, new_slot_id: int) -> None:
+        await self._execute(
+            """
+            UPDATE appointments
+            SET slot_id = ?,
+                reminder_job_id = NULL
+            WHERE id = ? AND status = 'booked'
+            """,
+            (new_slot_id, appointment_id),
+        )
+
     async def update_appointment_reminder_job(self, appointment_id: int, job_id: str | None) -> None:
         await self._execute(
             "UPDATE appointments SET reminder_job_id = ? WHERE id = ?",
@@ -406,6 +434,7 @@ class Database:
             SELECT
                 a.id,
                 a.user_id,
+                a.username,
                 a.full_name,
                 a.phone,
                 a.status,

@@ -4,7 +4,6 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 from aiogram import Bot, F, Router
-from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -92,11 +91,11 @@ async def start_booking(
         await callback.answer()
         return
 
-    subscribed = await is_subscribed(bot, config.SUBSCRIBE_CHANNEL_ID, callback.from_user.id)
+    subscribed = await is_subscribed(bot, config.CHANNEL_ID, callback.from_user.id)
     if not subscribed:
         await callback.message.edit_text(
             "Для записи необходимо подписаться на канал.",
-            reply_markup=get_subscription_kb(config.SUBSCRIBE_CHANNEL_LINK),
+            reply_markup=get_subscription_kb(config.CHANNEL_LINK),
         )
         await callback.answer()
         return
@@ -113,7 +112,7 @@ async def check_subscription_callback(
     config: Config,
     state: FSMContext,
 ) -> None:
-    subscribed = await is_subscribed(bot, config.SUBSCRIBE_CHANNEL_ID, callback.from_user.id)
+    subscribed = await is_subscribed(bot, config.CHANNEL_ID, callback.from_user.id)
     if not subscribed:
         await callback.answer("Подписка пока не подтверждена.", show_alert=True)
         return
@@ -173,7 +172,7 @@ async def booking_choose_date(
     await callback.answer()
 
 
-@router.callback_query(StateFilter(BookingStates.choosing_category, BookingStates.choosing_service), CategoryCb.filter())
+@router.callback_query(CategoryCb.filter())
 async def booking_choose_category(
     callback: CallbackQuery,
     callback_data: CategoryCb,
@@ -233,7 +232,7 @@ async def booking_choose_service(
         reply_markup=get_slots_kb(slots),
     )
     await callback.answer()
-    
+
 
 @router.callback_query(SlotCb.filter())
 async def booking_choose_slot(
@@ -386,21 +385,20 @@ async def booking_confirm(
     await state.clear()
 
     if appointment:
-        # Уведомление администраторам
-        for admin_id in config.ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    format_admin_appointment_notification(appointment),
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
+        # Уведомление владельцу бота
+        try:
+            await bot.send_message(
+                config.ADMIN_ID,
+                format_admin_appointment_notification(appointment),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
 
         # Уведомление в канал с расписанием
         try:
             await bot.send_message(
-                config.SCHEDULE_CHANNEL_ID,
+                config.CHANNEL_ID,
                 format_channel_booking_notification(appointment),
                 parse_mode="HTML",
             )
@@ -453,19 +451,18 @@ async def cancel_my_booking(
     await db.cancel_appointment(appointment["id"], cancelled_by="user")
     await db.update_appointment_reminder_job(appointment["id"], None)
 
-    for admin_id in config.ADMIN_IDS:
-        try:
-            await bot.send_message(
-                admin_id,
-                "❌ <b>Клиент отменил запись</b>\n\n" + format_appointment_html(appointment),
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
+    try:
+        await bot.send_message(
+            config.ADMIN_ID,
+            "❌ <b>Клиент отменил запись</b>\n\n" + format_appointment_html(appointment),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
     try:
         await bot.send_message(
-            config.SCHEDULE_CHANNEL_ID,
+            config.CHANNEL_ID,
             format_channel_cancellation_notification(appointment),
             parse_mode="HTML",
         )
