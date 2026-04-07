@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -1326,23 +1327,20 @@ async def admin_blocked_clients(callback: CallbackQuery, config: Config, db: Dat
     if not is_admin(callback.from_user.id, config):
         await callback.answer("Доступ запрещён.", show_alert=True)
         return
-
     clients = await db.get_blocked_clients()
-
     if not clients:
-        text = "⛔ <b>Стоп-лист</b>\n\nСейчас список пуст."
-        markup = get_admin_menu_kb()
-    else:
-        text = "⛔ <b>Стоп-лист</b>\n\nВыберите клиента:"
-        markup = get_admin_clients_kb(clients)
-
-    try:
-        await callback.message.edit_text(text, reply_markup=markup)
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            raise
-
+        await callback.message.edit_text(
+            "⛔ <b>Стоп-лист</b>\n\nСейчас список пуст.",
+            reply_markup=get_admin_menu_kb(),
+        )
+        await callback.answer()
+        return
+    await callback.message.edit_text(
+        "⛔ <b>Стоп-лист</b>\n\nВыберите клиента:",
+        reply_markup=get_admin_clients_kb(clients),
+    )
     await callback.answer()
+
 
 @router.callback_query(ClientAdminCb.filter(F.action == "toggle_block"))
 async def admin_toggle_client_block(callback: CallbackQuery, callback_data: ClientAdminCb, config: Config, db: Database) -> None:
