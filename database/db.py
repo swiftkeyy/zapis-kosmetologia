@@ -5,6 +5,20 @@ from typing import Any
 
 import aiosqlite
 
+class Database:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.conn: aiosqlite.Connection | None = None
+
+    async def connect(self) -> None:
+        self.conn = await aiosqlite.connect(self.db_path)
+        self.conn.row_factory = aiosqlite.Row
+
+        await self.conn.execute("PRAGMA foreign_keys = ON;")
+        await self.conn.execute("PRAGMA journal_mode = WAL;")
+        await self.conn.execute("PRAGMA synchronous = NORMAL;")
+        await self.conn.commit()
+
 from utils.default_data import CATEGORY_TITLES, DEFAULT_SERVICES
 
 
