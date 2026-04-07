@@ -385,6 +385,7 @@ async def booking_confirm(
     await state.clear()
 
     if appointment:
+<<<<<<< HEAD
         # Уведомление владельцу бота
         try:
             await bot.send_message(
@@ -394,6 +395,18 @@ async def booking_confirm(
             )
         except Exception:
             pass
+=======
+        # Уведомление администраторам
+        for admin_id in config.ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    format_admin_appointment_notification(appointment),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+>>>>>>> a551ec1 (fix indentation in booking)
 
         # Уведомление в канал с расписанием
         try:
@@ -451,6 +464,7 @@ async def cancel_my_booking(
     await db.cancel_appointment(appointment["id"], cancelled_by="user")
     await db.update_appointment_reminder_job(appointment["id"], None)
 
+<<<<<<< HEAD
     try:
         await bot.send_message(
             config.ADMIN_ID,
@@ -459,6 +473,17 @@ async def cancel_my_booking(
         )
     except Exception:
         pass
+=======
+    for admin_id in config.ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                "❌ <b>Клиент отменил запись</b>\n\n" + format_appointment_html(appointment),
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+>>>>>>> a551ec1 (fix indentation in booking)
 
     try:
         await bot.send_message(
