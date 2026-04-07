@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 from aiogram import Bot, F, Router
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
@@ -28,10 +29,9 @@ from utils.helpers import human_date, normalize_phone, validate_phone
 from utils.messages import (
     format_admin_appointment_notification,
     format_appointment_html,
-    format_channel_cancellation_notification,
     format_channel_booking_notification,
+    format_channel_cancellation_notification,
 )
-
 
 router = Router(name="booking")
 
@@ -91,11 +91,11 @@ async def start_booking(
         await callback.answer()
         return
 
-    subscribed = await is_subscribed(bot, config.CHANNEL_ID, callback.from_user.id)
+    subscribed = await is_subscribed(bot, config.SUBSCRIBE_CHANNEL_ID, callback.from_user.id)
     if not subscribed:
         await callback.message.edit_text(
             "Для записи необходимо подписаться на канал.",
-            reply_markup=get_subscription_kb(config.CHANNEL_LINK),
+            reply_markup=get_subscription_kb(config.SUBSCRIBE_CHANNEL_LINK),
         )
         await callback.answer()
         return
@@ -112,7 +112,7 @@ async def check_subscription_callback(
     config: Config,
     state: FSMContext,
 ) -> None:
-    subscribed = await is_subscribed(bot, config.CHANNEL_ID, callback.from_user.id)
+    subscribed = await is_subscribed(bot, config.SUBSCRIBE_CHANNEL_ID, callback.from_user.id)
     if not subscribed:
         await callback.answer("Подписка пока не подтверждена.", show_alert=True)
         return
@@ -172,7 +172,7 @@ async def booking_choose_date(
     await callback.answer()
 
 
-@router.callback_query(CategoryCb.filter())
+@router.callback_query(StateFilter(BookingStates.choosing_category, BookingStates.choosing_service), CategoryCb.filter())
 async def booking_choose_category(
     callback: CallbackQuery,
     callback_data: CategoryCb,
@@ -380,12 +380,11 @@ async def booking_confirm(
         await callback.answer()
         return
 
-        await scheduler.schedule_appointment_reminder(appointment_id)
+    await scheduler.schedule_appointment_reminder(appointment_id)
     appointment = await db.get_appointment(appointment_id)
     await state.clear()
 
     if appointment:
-        # Уведомление администраторам
         for admin_id in config.ADMIN_IDS:
             try:
                 await bot.send_message(
@@ -396,7 +395,6 @@ async def booking_confirm(
             except Exception:
                 pass
 
-        # Уведомление в канал с расписанием
         try:
             await bot.send_message(
                 config.SCHEDULE_CHANNEL_ID,
@@ -407,8 +405,7 @@ async def booking_confirm(
             pass
 
         await callback.message.edit_text(
-            "✅ <b>Запись успешно создана!</b>\n\n"
-            + format_appointment_html(appointment),
+            "✅ <b>Запись успешно создана!</b>\n\n" + format_appointment_html(appointment),
             reply_markup=get_back_menu_kb(),
         )
     else:
@@ -418,6 +415,7 @@ async def booking_confirm(
         )
 
     await callback.answer("Готово!")
+
 
 @router.callback_query(ConfirmCb.filter(F.action == "cancel_my"))
 async def ask_cancel_my_booking(callback: CallbackQuery, callback_data: ConfirmCb, db: Database) -> None:
@@ -450,15 +448,7 @@ async def cancel_my_booking(
     scheduler.remove_job(appointment.get("reminder_job_id"))
     await db.cancel_appointment(appointment["id"], cancelled_by="user")
     await db.update_appointment_reminder_job(appointment["id"], None)
-    
-    try:
-        await bot.send_message(
-            config.ADMIN_ID,
-            "❌ <b>Клиент отменил запись</b>\n\n" + format_appointment_html(appointment),
-            parse_mode="HTML",
-        )
-    except Exception:
-        pass
+
     for admin_id in config.ADMIN_IDS:
         try:
             await bot.send_message(
@@ -468,12 +458,10 @@ async def cancel_my_booking(
             )
         except Exception:
             pass
-            
-        a551ec1 (fix indentation in booking)
 
     try:
         await bot.send_message(
-            config.CHANNEL_ID,
+            config.SCHEDULE_CHANNEL_ID,
             format_channel_cancellation_notification(appointment),
             parse_mode="HTML",
         )
