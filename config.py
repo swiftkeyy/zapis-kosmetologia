@@ -21,6 +21,7 @@ class Config:
     SUBSCRIBE_CHANNEL_LINK: str = ""
     SCHEDULE_CHANNEL_ID: int = 0
 
+    # Обратная совместимость со старым кодом
     CHANNEL_ID: int = 0
     CHANNEL_LINK: str = ""
 
@@ -34,7 +35,6 @@ def _parse_admin_ids() -> tuple[list[int], int]:
     admin_id_raw = os.getenv("ADMIN_ID", "").strip()
 
     admin_ids: list[int] = []
-
     if admin_ids_raw:
         admin_ids = [int(x.strip()) for x in admin_ids_raw.split(",") if x.strip()]
     elif admin_id_raw:
@@ -65,7 +65,7 @@ def _resolve_database_path() -> tuple[str, str]:
 def load_config() -> Config:
     bot_token = os.getenv("BOT_TOKEN", "").strip()
     if not bot_token:
-        raise ValueError("Не найден BOT_TOKEN в переменных окружения")
+        raise ValueError("Не найден BOT_TOKEN в .env")
 
     admin_ids, first_admin_id = _parse_admin_ids()
 
@@ -73,6 +73,7 @@ def load_config() -> Config:
     subscribe_channel_link = os.getenv("SUBSCRIBE_CHANNEL_LINK", "").strip()
     schedule_channel_id = os.getenv("SCHEDULE_CHANNEL_ID", "").strip()
 
+    # Старые переменные для совместимости
     channel_id = os.getenv("CHANNEL_ID", "").strip()
     channel_link = os.getenv("CHANNEL_LINK", "").strip()
 
@@ -81,11 +82,11 @@ def load_config() -> Config:
     final_schedule_channel_id = schedule_channel_id or channel_id
 
     if not final_subscribe_channel_id:
-        raise ValueError("Не найден SUBSCRIBE_CHANNEL_ID или CHANNEL_ID")
+        raise ValueError("Не найден SUBSCRIBE_CHANNEL_ID или CHANNEL_ID в .env")
     if not final_subscribe_channel_link:
-        raise ValueError("Не найден SUBSCRIBE_CHANNEL_LINK или CHANNEL_LINK")
+        raise ValueError("Не найден SUBSCRIBE_CHANNEL_LINK или CHANNEL_LINK в .env")
     if not final_schedule_channel_id:
-        raise ValueError("Не найден SCHEDULE_CHANNEL_ID или CHANNEL_ID")
+        raise ValueError("Не найден SCHEDULE_CHANNEL_ID или CHANNEL_ID в .env")
 
     data_dir, database_path = _resolve_database_path()
 
