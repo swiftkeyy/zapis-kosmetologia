@@ -380,22 +380,11 @@ async def booking_confirm(
         await callback.answer()
         return
 
-    await scheduler.schedule_appointment_reminder(appointment_id)
+        await scheduler.schedule_appointment_reminder(appointment_id)
     appointment = await db.get_appointment(appointment_id)
     await state.clear()
 
     if appointment:
-<<<<<<< HEAD
-        # Уведомление владельцу бота
-        try:
-            await bot.send_message(
-                config.ADMIN_ID,
-                format_admin_appointment_notification(appointment),
-                parse_mode="HTML",
-            )
-        except Exception:
-            pass
-=======
         # Уведомление администраторам
         for admin_id in config.ADMIN_IDS:
             try:
@@ -406,12 +395,11 @@ async def booking_confirm(
                 )
             except Exception:
                 pass
->>>>>>> a551ec1 (fix indentation in booking)
 
         # Уведомление в канал с расписанием
         try:
             await bot.send_message(
-                config.CHANNEL_ID,
+                config.SCHEDULE_CHANNEL_ID,
                 format_channel_booking_notification(appointment),
                 parse_mode="HTML",
             )
@@ -430,7 +418,6 @@ async def booking_confirm(
         )
 
     await callback.answer("Готово!")
-
 
 @router.callback_query(ConfirmCb.filter(F.action == "cancel_my"))
 async def ask_cancel_my_booking(callback: CallbackQuery, callback_data: ConfirmCb, db: Database) -> None:
