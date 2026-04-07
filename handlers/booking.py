@@ -468,6 +468,7 @@ async def cancel_my_booking(
             )
         except Exception:
             pass
+            
         a551ec1 (fix indentation in booking)
 
     try:
